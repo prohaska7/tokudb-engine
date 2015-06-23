@@ -722,7 +722,7 @@ static bool tokudb_flush_logs(handlerton *hton) {
             goto exit;
         }
     }
-    else {
+    else if (!binlog_group_commit) {
         error = db_env->log_flush(db_env, NULL);
         assert(error == 0);
     }
