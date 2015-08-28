@@ -725,14 +725,20 @@ private:
     int send_upsert_message(THD *thd, List<Item> &update_fields, List<Item> &update_values, DB_TXN *txn);
 #endif
 public:
+#if TOKU_TXN_CURSOR_BUG
     // mysql sometimes retires a txn before a cursor that references the txn is closed.
     // for example, commit is sometimes called before index_end.  the following methods
     // put the handler on a list of handlers that get cleaned up when the txn is retired.
+#endif
     void cleanup_txn(DB_TXN *txn);
 private:
+#if TOKU_TXN_CURSOR_BUG
     LIST trx_handler_list;
     void add_to_trx_handler_list();
     void remove_from_trx_handler_list();
+#endif
+    LIST all_trx_handler_list;
+    int maybe_create_transaction(THD *, tokudb_trx_data *);
 
 private:
     int do_optimize(THD *thd);

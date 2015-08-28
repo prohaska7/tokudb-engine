@@ -939,19 +939,16 @@ static uchar* pack_toku_field_blob(
 }
 
 static int create_tokudb_trx_data_instance(tokudb_trx_data** out_trx) {
-    int error;
     tokudb_trx_data* trx = (tokudb_trx_data *) tokudb_my_malloc(sizeof(*trx), MYF(MY_ZEROFILL));
-    if (!trx) {
+    int error;
+    if (trx) {
+        *out_trx = trx;
+        error = 0;
+    } else {
         error = ENOMEM;
-        goto cleanup;
     }
-
-    *out_trx = trx;
-    error = 0;
-cleanup:
     return error;
 }
-
 
 static inline int tokudb_generate_row(
     DB *dest_db, 
@@ -1181,8 +1178,21 @@ ha_tokudb::ha_tokudb(handlerton * hton, TABLE_SHARE * table_arg):handler(hton, t
     prelocked_right_range_size = 0;
     tokudb_active_index = MAX_KEY;
     invalidate_icp();
+#if TOKU_TXN_CURSOR_BUG
     trx_handler_list.data = this;
+#endif
     in_rpl_write_rows = in_rpl_delete_rows = in_rpl_update_rows = false;
+
+    tokudb_trx_data *trx = (tokudb_trx_data *) thd_get_ha_data(ha_thd(), tokudb_hton);
+    if (!trx) {
+        int error = create_tokudb_trx_data_instance(&trx);
+        assert(error == 0);
+        thd_set_ha_data(ha_thd(), tokudb_hton, trx);
+    }
+
+    all_trx_handler_list.data = this;
+    trx->all_handlers = list_add(trx->all_handlers, &all_trx_handler_list);
+
     TOKUDB_HANDLER_DBUG_VOID_RETURN;
 }
 
@@ -1194,6 +1204,8 @@ ha_tokudb::~ha_tokudb() {
     for (uint32_t i = 0; i < sizeof(mult_rec_dbt_array)/sizeof(mult_rec_dbt_array[0]); i++) {
         toku_dbt_array_destroy(&mult_rec_dbt_array[i]);
     }
+    tokudb_trx_data *trx = (tokudb_trx_data *) thd_get_ha_data(ha_thd(), tokudb_hton);
+    trx->all_handlers = list_delete(trx->all_handlers, &all_trx_handler_list);
     TOKUDB_HANDLER_DBUG_VOID_RETURN;
 }
 
@@ -3761,6 +3773,24 @@ out:
     return error;
 }
 
+int ha_tokudb::maybe_create_transaction(THD *thd, tokudb_trx_data *trx) {
+    int error = 0;
+    if (!transaction) {
+        if (thd->slave_thread) {
+            error = create_txn(thd, trx);
+            if (!error) {
+                transaction = trx->sub_sp_level;
+                if (tokudb_debug & TOKUDB_DEBUG_TXN) {
+                    TOKUDB_HANDLER_TRACE("txn %p", transaction);
+                }
+            }
+        } else {
+            error = EINVAL;
+        }
+    }
+    return error;
+}
+
 //
 // Stores a row in the table, called when handling an INSERT query
 // Parameters:
@@ -3778,10 +3808,15 @@ int ha_tokudb::write_row(uchar * record) {
     bool has_null;
     DB_TXN* sub_trans = NULL;
     DB_TXN* txn = NULL;
-    tokudb_trx_data *trx = NULL;
     uint curr_num_DBs;
     bool create_sub_trans = false;
     bool num_DBs_locked = false;
+
+    tokudb_trx_data *trx = (tokudb_trx_data *) thd_get_ha_data(thd, tokudb_hton);
+    error = maybe_create_transaction(thd, trx);
+    if (error) {
+        goto cleanup;
+    }
 
     //
     // some crap that needs to be done because MySQL does not properly abstract
@@ -3910,7 +3945,6 @@ int ha_tokudb::write_row(uchar * record) {
         }
     }
 
-    trx = (tokudb_trx_data *) thd_get_ha_data(thd, tokudb_hton);
     if (!error) {
         added_rows++;
         trx->stmt_progress.inserted++;
@@ -4363,7 +4397,9 @@ cleanup:
             int r = cursor->c_close(cursor);
             assert(r==0);
             cursor = NULL;
+#if TOKU_TXN_CURSOR_BUG
             remove_from_trx_handler_list();
+#endif
         }
     }
     TOKUDB_HANDLER_DBUG_RETURN(error);
@@ -4405,7 +4441,9 @@ int ha_tokudb::index_init(uint keynr, bool sorted) {
         DBUG_PRINT("note", ("Closing active cursor"));
         int r = cursor->c_close(cursor);
         assert(r==0);
+#if TOKU_TXN_CURSOR_BUG
         remove_from_trx_handler_list();
+#endif
     }
     active_index = keynr;
 
@@ -4450,9 +4488,9 @@ int ha_tokudb::index_init(uint keynr, bool sorted) {
     }
     cursor->c_set_check_interrupt_callback(cursor, tokudb_killed_thd_callback, thd);
     memset((void *) &last_key, 0, sizeof(last_key));
-
+#if TOKU_TXN_CURSOR_BUG
     add_to_trx_handler_list();
-
+#endif
     if (thd_sql_command(thd) == SQLCOM_SELECT) {
         set_query_columns(keynr);
         unpack_entire_row = false;
@@ -4480,7 +4518,9 @@ int ha_tokudb::index_end() {
         int r = cursor->c_close(cursor);
         assert(r==0);
         cursor = NULL;
+#if TOKU_TXN_CURSOR_BUG
         remove_from_trx_handler_list();
+#endif
         last_cursor_error = 0;
     }
     active_index = tokudb_active_index = MAX_KEY;
@@ -5666,7 +5706,9 @@ int ha_tokudb::prelock_range(const key_range *start_key, const key_range *end_ke
             int r = cursor->c_close(cursor);
             assert(r==0);
             cursor = NULL;
+#if TOKU_TXN_CURSOR_BUG
             remove_from_trx_handler_list();
+#endif
         }
         goto cleanup; 
     }
@@ -6097,11 +6139,6 @@ int ha_tokudb::external_lock(THD * thd, int lock_type) {
 
     int error = 0;
     tokudb_trx_data *trx = (tokudb_trx_data *) thd_get_ha_data(thd, tokudb_hton);
-    if (!trx) {
-        error = create_tokudb_trx_data_instance(&trx);
-        if (error) { goto cleanup; }
-        thd_set_ha_data(thd, tokudb_hton, trx);
-    }
 
     if (tokudb_debug & TOKUDB_DEBUG_TXN) {
         TOKUDB_HANDLER_TRACE("trx %p %p %p %p %u %u", trx->all, trx->stmt, trx->sp_level, trx->sub_sp_level, 
@@ -6178,11 +6215,6 @@ int ha_tokudb::start_stmt(THD * thd, thr_lock_type lock_type) {
 
     int error = 0;
     tokudb_trx_data *trx = (tokudb_trx_data *) thd_get_ha_data(thd, tokudb_hton);
-    if (!trx) {
-        error = create_tokudb_trx_data_instance(&trx);
-        if (error) { goto cleanup; }
-        thd_set_ha_data(thd, tokudb_hton, trx);
-    }
 
     if (tokudb_debug & TOKUDB_DEBUG_TXN) {
         TOKUDB_HANDLER_TRACE("trx %p %p %p %p %u %u", trx->all, trx->stmt, trx->sp_level, trx->sub_sp_level, 
@@ -8145,13 +8177,22 @@ Item* ha_tokudb::idx_cond_push(uint keyno_arg, Item* idx_cond_arg) {
 }
 
 void ha_tokudb::cleanup_txn(DB_TXN *txn) {
+#if TOKU_TXN_CURSOR_BUG
     if (transaction == txn && cursor) {
         int r = cursor->c_close(cursor);
         assert(r == 0);
         cursor = NULL;
     }
+#endif
+    if (transaction == txn) {
+        if (tokudb_debug & TOKUDB_DEBUG_TXN) {
+            TOKUDB_HANDLER_TRACE("cleanup txn %p", transaction);
+        }
+        transaction = NULL;
+    }
 }
 
+#if TOKU_TXN_CURSOR_BUG
 void ha_tokudb::add_to_trx_handler_list() {
     tokudb_trx_data *trx = (tokudb_trx_data *) thd_get_ha_data(ha_thd(), tokudb_hton);
     trx->handlers = list_add(trx->handlers, &trx_handler_list);
@@ -8161,6 +8202,7 @@ void ha_tokudb::remove_from_trx_handler_list() {
     tokudb_trx_data *trx = (tokudb_trx_data *) thd_get_ha_data(ha_thd(), tokudb_hton);
     trx->handlers = list_delete(trx->handlers, &trx_handler_list);
 }
+#endif
 
 void ha_tokudb::rpl_before_write_rows() {
     in_rpl_write_rows = true;

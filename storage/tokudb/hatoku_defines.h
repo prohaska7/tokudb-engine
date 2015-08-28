@@ -291,7 +291,10 @@ typedef struct st_tokudb_trx_data {
     uint create_lock_count;
     tokudb_stmt_progress stmt_progress;
     bool checkpoint_lock_taken;
+#if TOKU_TXN_CURSOR_BUG
     LIST *handlers;
+#endif
+    LIST *all_handlers;
 } tokudb_trx_data;
 
 extern char *tokudb_data_dir;
