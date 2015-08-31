@@ -3777,7 +3777,9 @@ int ha_tokudb::maybe_create_transaction(THD *thd, tokudb_trx_data *trx) {
     int error = 0;
     if (!transaction) {
         if (thd->slave_thread) {
-            error = create_txn(thd, trx);
+            if (!trx->stmt) {
+                error = create_txn(thd, trx);
+            }
             if (!error) {
                 transaction = trx->sub_sp_level;
                 if (tokudb_debug & TOKUDB_DEBUG_TXN) {
