@@ -37,6 +37,14 @@ Copyright (c) 2006, 2015, Percona and/or its affiliates. All rights reserved.
 #error
 #endif
 
+#if 50709 <= MYSQL_VERSION_ID && MYSQL_VERSION_ID <= 50799
+#define TOKU_ALTER_COLUMN_TYPE ALTER_STORED_COLUMN_TYPE
+#define TOKU_ALTER_COLUMN_ORDER ALTER_STORED_COLUMN_ORDER
+#else
+#define TOKU_ALTER_COLUMN_TYPE ALTER_COLUMN_TYPE
+#define TOKU_ALTER_COLUMN_ORDER ALTER_COLUMN_ORDER
+#endif
+
 #include "ha_tokudb_alter_common.cc"
 #include <sql_array.h>
 #include <sql_base.h>
@@ -198,9 +206,9 @@ static ulong fix_handler_flags(THD *thd, TABLE *table, TABLE *altered_table, Alt
     }
 
     // ALTER_COLUMN_TYPE may be set when no columns have been changed, so turn off the flag
-    if (handler_flags & Alter_inplace_info::ALTER_COLUMN_TYPE) {
+    if (handler_flags & Alter_inplace_info::TOKU_ALTER_COLUMN_TYPE) {
         if (all_fields_are_same_type(table, altered_table)) {
-            handler_flags &= ~Alter_inplace_info::ALTER_COLUMN_TYPE;
+            handler_flags &= ~Alter_inplace_info::TOKU_ALTER_COLUMN_TYPE;
         }
     }
 
@@ -308,14 +316,14 @@ enum_alter_inplace_result ha_tokudb::check_if_supported_inplace_alter(TABLE *alt
         // has changed only its name. If we find anything to
         // the contrary, we don't allow it, also check indexes
         if (table->s->null_bytes == altered_table->s->null_bytes) {
-            bool cr_supported = column_rename_supported(table, altered_table, (ctx->handler_flags & Alter_inplace_info::ALTER_COLUMN_ORDER) != 0);
+            bool cr_supported = column_rename_supported(table, altered_table, (ctx->handler_flags & Alter_inplace_info::TOKU_ALTER_COLUMN_ORDER) != 0);
             if (cr_supported)
                 result = HA_ALTER_INPLACE_EXCLUSIVE_LOCK;
         }
     } else    
     // add column
     if (ctx->handler_flags & Alter_inplace_info::ADD_COLUMN &&
-        only_flags(ctx->handler_flags, Alter_inplace_info::ADD_COLUMN + Alter_inplace_info::ALTER_COLUMN_ORDER) &&
+        only_flags(ctx->handler_flags, Alter_inplace_info::ADD_COLUMN + Alter_inplace_info::TOKU_ALTER_COLUMN_ORDER) &&
         setup_kc_info(altered_table, ctx->altered_table_kc_info) == 0) {
 
         uint32_t added_columns[altered_table->s->fields];
@@ -334,7 +342,7 @@ enum_alter_inplace_result ha_tokudb::check_if_supported_inplace_alter(TABLE *alt
     } else
     // drop column
     if (ctx->handler_flags & Alter_inplace_info::DROP_COLUMN &&
-        only_flags(ctx->handler_flags, Alter_inplace_info::DROP_COLUMN + Alter_inplace_info::ALTER_COLUMN_ORDER) &&
+        only_flags(ctx->handler_flags, Alter_inplace_info::DROP_COLUMN + Alter_inplace_info::TOKU_ALTER_COLUMN_ORDER) &&
         setup_kc_info(altered_table, ctx->altered_table_kc_info) == 0) {
 
         uint32_t dropped_columns[table->s->fields];
@@ -363,8 +371,8 @@ enum_alter_inplace_result ha_tokudb::check_if_supported_inplace_alter(TABLE *alt
         }
     } else
     // change column type
-    if ((ctx->handler_flags & Alter_inplace_info::ALTER_COLUMN_TYPE) &&
-        only_flags(ctx->handler_flags, Alter_inplace_info::ALTER_COLUMN_TYPE + Alter_inplace_info::ALTER_COLUMN_DEFAULT) && 
+    if ((ctx->handler_flags & Alter_inplace_info::TOKU_ALTER_COLUMN_TYPE) &&
+        only_flags(ctx->handler_flags, Alter_inplace_info::TOKU_ALTER_COLUMN_TYPE + Alter_inplace_info::ALTER_COLUMN_DEFAULT) &&
         table->s->fields == altered_table->s->fields && 
         find_changed_fields(table, altered_table, ctx->changed_fields) > 0 &&
         setup_kc_info(altered_table, ctx->altered_table_kc_info) == 0) {

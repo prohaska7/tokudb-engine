@@ -580,4 +580,20 @@ static inline void tokudb_rw_wrlock(tokudb_rw_lock_t *rwlock) {
     assert(r == 0);
 }
 
+#if 50709 <= MYSQL_VERSION_ID && MYSQL_VERSION_ID <= 50799
+static inline void tokudb_set_my_errno(int _my_errno) {
+    set_my_errno(_my_errno);
+}
+static inline int tokudb_get_my_errno(void) {
+    return my_errno();
+}
+#else
+static inline void tokudb_set_my_errno(int _my_errno) {
+    my_errno = _my_errno;
+}
+static inline int tokudb_get_my_errno(void) {
+    return my_errno;
+}
+#endif
+
 #endif // _TOKUDB_PORTABILITY_H

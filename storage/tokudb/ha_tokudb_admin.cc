@@ -275,12 +275,12 @@ static int ha_tokudb_check_progress(void *extra, float progress) {
 }
 
 static void ha_tokudb_check_info(THD *thd, TABLE *table, const char *msg) {
+#if 0
     if (thd->vio_ok()) {
         char tablename[table->s->db.length + 1 + table->s->table_name.length + 1];
         snprintf(tablename, sizeof tablename, "%.*s.%.*s",
                  (int) table->s->db.length, table->s->db.str,
                  (int) table->s->table_name.length, table->s->table_name.str);
-#if 0
         Protocol *protocol = thd->protocol;
         protocol->prepare_for_resend();
         protocol->store(tablename, strlen(tablename), system_charset_info);
@@ -288,8 +288,8 @@ static void ha_tokudb_check_info(THD *thd, TABLE *table, const char *msg) {
         protocol->store("info", 4, system_charset_info);
         protocol->store(msg, strlen(msg), system_charset_info);
         protocol->write();
-#endif
     }
+#endif
 }
 
 int ha_tokudb::check(THD *thd, HA_CHECK_OPT *check_opt) {

@@ -1325,13 +1325,13 @@ int ha_tokudb::open_secondary_dictionary(DB** ptr, KEY* key_info, const char* na
 
 
     if ((error = db_create(ptr, db_env, 0))) {
-        my_errno = error;
+        tokudb_set_my_errno(error);
         goto cleanup;
     }
 
 
     if ((error = (*ptr)->open(*ptr, txn, newname, NULL, DB_BTREE, open_flags, 0))) {
-        my_errno = error;
+        tokudb_set_my_errno(error);
         goto cleanup;
     }
     if (tokudb_debug & TOKUDB_DEBUG_OPEN) {
@@ -1838,7 +1838,7 @@ exit:
         rec_update_buff = NULL;
         
         if (error) {
-            my_errno = error;
+            tokudb_set_my_errno(error);
         }
     }
     TOKUDB_HANDLER_DBUG_RETURN(ret_val);
@@ -3312,7 +3312,7 @@ cleanup:
     abort_loader = false;
     memset(&lc, 0, sizeof(lc));
     if (error || loader_error) {
-        my_errno = error ? error : loader_error;
+        tokudb_set_my_errno(error ? error : loader_error);
         if (using_loader) {
             share->try_table_lock = true;
         }
@@ -6375,7 +6375,7 @@ static int create_sub_table(
     error = db_create(&file, db_env, 0);
     if (error) {
         DBUG_PRINT("error", ("Got error: %d when creating table", error));
-        my_errno = error;
+        tokudb_set_my_errno(error);
         goto exit;
     }
         
@@ -6923,13 +6923,13 @@ cleanup:
 int ha_tokudb::discard_or_import_tablespace(my_bool discard) {
     /*
     if (discard) {
-        my_errno=HA_ERR_WRONG_COMMAND;
+        tokudb_set_my_errno(HA_ERR_WRONG_COMMAND);
         return my_errno;
     }
     return add_table_to_metadata(share->table_name);
     */
-    my_errno=HA_ERR_WRONG_COMMAND;
-    return my_errno;
+    tokudb_set_my_errno(HA_ERR_WRONG_COMMAND);
+    return tokudb_get_my_errno();
 }
 
 
@@ -7073,7 +7073,7 @@ int ha_tokudb::delete_or_rename_table (const char* from_name, const char* to_nam
     error = delete_or_rename_dictionary(from_name, to_name, "status", false, txn, is_delete);
     if (error) { goto cleanup; }
 
-    my_errno = error;
+    tokudb_set_my_errno(error);
 cleanup:
     if (status_cursor) {
         int r = status_cursor->c_close(status_cursor);

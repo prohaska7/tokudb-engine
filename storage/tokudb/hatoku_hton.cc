@@ -1203,7 +1203,7 @@ static bool tokudb_show_engine_status(THD * thd, stat_print_fn * stat_print) {
         snprintf(buf, bufsiz, "%" PRIu64, bytes_inserted);
         STATPRINT("handlerton: primary key bytes inserted", buf);
     }  
-    if (error) { my_errno = error; }
+    if (error) { tokudb_set_my_errno(error); }
     TOKUDB_DBUG_RETURN(error);
 }
 
@@ -2515,7 +2515,7 @@ static int show_tokudb_vars(THD *thd, SHOW_VAR *var, char *buff) {
         var->type= SHOW_ARRAY;
         var->value= (char *) toku_global_status_variables;
     }
-    if (error) { my_errno = error; }
+    if (error) { tokudb_set_my_errno(error); }
     TOKUDB_DBUG_RETURN(error);
 }
 
